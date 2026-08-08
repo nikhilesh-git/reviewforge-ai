@@ -1,0 +1,64 @@
+# =============================================================================
+# Docker Compose Override — Development
+# Adds hot-reload volume mounts and debug settings.
+# Merged automatically by: docker compose up (when this file is present)
+# =============================================================================
+
+services:
+
+  gateway:
+    build:
+      target: development
+    environment:
+      APP_ENV: development
+      DEBUG: "true"
+      LOG_LEVEL: DEBUG
+    volumes:
+      - ./services/gateway/app:/app/app:ro
+      - ./shared:/shared:ro
+    command: >
+      uvicorn app.main:app
+      --host 0.0.0.0
+      --port 8000
+      --reload
+      --reload-dir /app
+      --log-level debug
+
+  worker:
+    build:
+      target: development
+    environment:
+      APP_ENV: development
+      DEBUG: "true"
+      LOG_LEVEL: DEBUG
+    volumes:
+      - ./services/worker/app:/app/app:ro
+      - ./shared:/shared:ro
+    command: >
+      celery -A app.celery_app worker
+      --loglevel=debug
+      --concurrency=2
+      --queues=review,priority
+      --hostname=worker@%h
+
+  reviewer:
+    build:
+      target: development
+    environment:
+      APP_ENV: development
+      DEBUG: "true"
+      LOG_LEVEL: DEBUG
+    volumes:
+      - ./services/reviewer/app:/app/app:ro
+      - ./shared:/shared:ro
+
+  learner:
+    build:
+      target: development
+    environment:
+      APP_ENV: development
+      DEBUG: "true"
+      LOG_LEVEL: DEBUG
+    volumes:
+      - ./services/learner/app:/app/app:ro
+      - ./shared:/shared:ro

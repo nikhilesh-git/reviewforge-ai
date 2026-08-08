@@ -1,0 +1,94 @@
+# Environment variables — NEVER commit these
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+env.bak/
+venv.bak/
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.tox/
+.nox/
+nosetests.xml
+test-results/
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pytype/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Ruff
+.ruff_cache/
+
+# Docker
+.dockerignore
+
+# Secrets
+*.pem
+*.key
+secrets/
+github_app_private_key.pem
+
+# Logs
+*.log
+logs/
+
+# Database
+*.sqlite3
+*.db
+
+# Distribution
+*.tar.gz
+*.zip
+
+# Node (for Langfuse)
+node_modules/
+
+# Temporary files
+tmp/
+temp/

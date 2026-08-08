@@ -1,0 +1,376 @@
+# =============================================================================
+# GitHub PR Code Reviewer — Docker Compose (Production)
+# All services, networks, and volumes defined here.
+# Override with docker-compose.override.yml for local development.
+# =============================================================================
+
+services:
+
+  # ─── Application Services ───────────────────────────────────────────────────
+
+  gateway:
+    build:
+      context: .
+      dockerfile: services/gateway/Dockerfile
+      target: production
+    image: github-pr-reviewer-gateway:latest
+    container_name: pr_reviewer_gateway
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      APP_NAME: pr-review-gateway
+      DEBUG: "false"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET}
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_PAT: ${GITHUB_PAT:-}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-prreviewer}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-prreviewer}
+      REDIS_URL: redis://redis:6379/0
+      REDIS_STREAM_NAME: ${REDIS_STREAM_NAME:-pr:events}
+      REDIS_MAX_STREAM_LENGTH: ${REDIS_MAX_STREAM_LENGTH:-10000}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      MAX_WEBHOOK_EVENTS_PER_MINUTE: ${MAX_WEBHOOK_EVENTS_PER_MINUTE:-100}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - pr_reviewer_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    labels:
+      - "prometheus.scrape=true"
+      - "prometheus.port=8000"
+      - "prometheus.path=/metrics"
+
+  worker:
+    build:
+      context: .
+      dockerfile: services/worker/Dockerfile
+      target: production
+    image: github-pr-reviewer-worker:latest
+    container_name: pr_reviewer_worker
+    restart: unless-stopped
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-prreviewer}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-prreviewer}
+      REDIS_URL: redis://redis:6379/0
+      REDIS_STREAM_NAME: ${REDIS_STREAM_NAME:-pr:events}
+      REDIS_STREAM_CONSUMER_GROUP: ${REDIS_STREAM_CONSUMER_GROUP:-review-workers}
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      PRIMARY_MODEL: ${PRIMARY_MODEL:-qwen/qwen3-coder:free}
+      FALLBACK_MODEL: ${FALLBACK_MODEL:-deepseek/deepseek-v3-base:free}
+      LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-8192}
+      LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.1}
+      LLM_REQUEST_TIMEOUT: ${LLM_REQUEST_TIMEOUT:-120}
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: "6333"
+      QDRANT_COLLECTION_NAME: ${QDRANT_COLLECTION_NAME:-repo_conventions}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
+      LANGFUSE_HOST: http://langfuse-server:3000
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_PAT: ${GITHUB_PAT:-}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    networks:
+      - pr_reviewer_net
+    healthcheck:
+      test: ["CMD", "celery", "-A", "app.celery_app", "inspect", "ping", "-t", "5"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
+
+  reviewer:
+    build:
+      context: .
+      dockerfile: services/reviewer/Dockerfile
+      target: production
+    image: github-pr-reviewer-reviewer:latest
+    container_name: pr_reviewer_reviewer
+    restart: unless-stopped
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-prreviewer}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-prreviewer}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_PAT: ${GITHUB_PAT:-}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - pr_reviewer_net
+
+  learner:
+    build:
+      context: .
+      dockerfile: services/learner/Dockerfile
+      target: production
+    image: github-pr-reviewer-learner:latest
+    container_name: pr_reviewer_learner
+    restart: unless-stopped
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      REDIS_URL: redis://redis:6379/0
+      REDIS_STREAM_NAME: ${REDIS_STREAM_NAME:-pr:events}
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      PRIMARY_MODEL: ${PRIMARY_MODEL:-qwen/qwen3-coder:free}
+      LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-4096}
+      LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.1}
+      LLM_REQUEST_TIMEOUT: ${LLM_REQUEST_TIMEOUT:-90}
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: "6333"
+      QDRANT_COLLECTION_NAME: ${QDRANT_COLLECTION_NAME:-repo_conventions}
+      QDRANT_EMBEDDING_DIM: ${QDRANT_EMBEDDING_DIM:-1536}
+      GITHUB_PAT: ${GITHUB_PAT:-}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+    depends_on:
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    networks:
+      - pr_reviewer_net
+    healthcheck:
+      test: ["CMD", "celery", "-A", "app.celery_app", "inspect", "ping", "-t", "5"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
+
+  # ─── Infrastructure Services ─────────────────────────────────────────────────
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: pr_reviewer_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-prreviewer}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-prreviewer}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - pr_reviewer_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-prreviewer} -d ${POSTGRES_DB:-prreviewer}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    ports:
+      - "5432:5432"   # Expose for local debugging; remove in strict production
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: pr_reviewer_redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --loglevel notice
+    volumes:
+      - redis_data:/data
+    networks:
+      - pr_reviewer_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "6379:6379"   # Expose for local debugging
+
+  qdrant:
+    image: qdrant/qdrant:v1.9.7
+    container_name: pr_reviewer_qdrant
+    restart: unless-stopped
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__HTTP_PORT: "6333"
+      QDRANT__SERVICE__GRPC_PORT: "6334"
+      QDRANT__LOG_LEVEL: INFO
+    networks:
+      - pr_reviewer_net
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/localhost/6333"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    ports:
+      - "6333:6333"   # REST API
+      - "6334:6334"   # gRPC
+
+  # ─── Observability ───────────────────────────────────────────────────────────
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: pr_reviewer_prometheus
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=30d"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+      - "--web.enable-lifecycle"
+      - "--web.enable-admin-api"
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - pr_reviewer_net
+    ports:
+      - "9090:9090"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: pr_reviewer_grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin_changeme}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_SERVER_ROOT_URL: http://localhost:3000
+      GF_INSTALL_PLUGINS: "grafana-clock-panel,grafana-simple-json-datasource"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    networks:
+      - pr_reviewer_net
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:3000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ─── Langfuse (Self-Hosted LLM Observability) ────────────────────────────────
+
+  langfuse-server:
+    image: langfuse/langfuse:2
+    container_name: pr_reviewer_langfuse
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://langfuse_user:${LANGFUSE_DB_PASSWORD:-langfuse_pass}@langfuse-postgres:5432/langfuse
+      NEXTAUTH_URL: http://localhost:3001
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET}
+      SALT: ${LANGFUSE_SALT}
+      TELEMETRY_ENABLED: ${LANGFUSE_TELEMETRY_ENABLED:-false}
+      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "true"
+      NODE_ENV: production
+    depends_on:
+      langfuse-postgres:
+        condition: service_healthy
+    networks:
+      - pr_reviewer_net
+    ports:
+      - "3001:3000"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api/public/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  langfuse-postgres:
+    image: postgres:16-alpine
+    container_name: pr_reviewer_langfuse_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: langfuse_user
+      POSTGRES_PASSWORD: ${LANGFUSE_DB_PASSWORD:-langfuse_pass}
+      POSTGRES_DB: langfuse
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - langfuse_postgres_data:/var/lib/postgresql/data
+    networks:
+      - pr_reviewer_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse_user -d langfuse"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+# ─── Networks ─────────────────────────────────────────────────────────────────
+networks:
+  pr_reviewer_net:
+    driver: bridge
+    name: pr_reviewer_net
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# ─── Volumes ──────────────────────────────────────────────────────────────────
+volumes:
+  postgres_data:
+    name: pr_reviewer_postgres_data
+  redis_data:
+    name: pr_reviewer_redis_data
+  qdrant_data:
+    name: pr_reviewer_qdrant_data
+  prometheus_data:
+    name: pr_reviewer_prometheus_data
+  grafana_data:
+    name: pr_reviewer_grafana_data
+  langfuse_postgres_data:
+    name: pr_reviewer_langfuse_postgres_data

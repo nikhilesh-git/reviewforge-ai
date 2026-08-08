@@ -1,0 +1,60 @@
+# Prometheus configuration for GitHub PR Code Reviewer
+# Scrapes all application services every 15 seconds
+
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'local'
+    env: 'development'
+
+# Alerting (no alertmanager in development)
+alerting:
+  alertmanagers: []
+
+# No rule files in development
+rule_files: []
+
+scrape_configs:
+
+  # ─── Gateway Service ─────────────────────────────────────────────────────────
+  - job_name: 'gateway'
+    static_configs:
+      - targets: ['gateway:8000']
+        labels:
+          service: 'gateway'
+          component: 'api'
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+
+  # ─── Prometheus self-monitoring ───────────────────────────────────────────────
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          service: 'prometheus'
+    metrics_path: '/metrics'
+
+  # ─── Grafana ─────────────────────────────────────────────────────────────────
+  - job_name: 'grafana'
+    static_configs:
+      - targets: ['grafana:3000']
+        labels:
+          service: 'grafana'
+    metrics_path: '/metrics'
+
+  # ─── Redis ───────────────────────────────────────────────────────────────────
+  # redis_exporter required for production Redis metrics
+  # Uncomment when redis_exporter is added to docker-compose
+  # - job_name: 'redis'
+  #   static_configs:
+  #     - targets: ['redis-exporter:9121']
+  #   metrics_path: '/metrics'
+
+  # ─── PostgreSQL ───────────────────────────────────────────────────────────────
+  # postgres_exporter required for production DB metrics
+  # - job_name: 'postgres'
+  #   static_configs:
+  #     - targets: ['postgres-exporter:9187']
+  #   metrics_path: '/metrics'

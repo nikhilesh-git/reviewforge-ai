@@ -1,0 +1,252 @@
+{
+  "id": null,
+  "uid": "agent-performance",
+  "title": "Agent Performance",
+  "description": "Per-agent latency, token usage, error rates, and finding distribution",
+  "tags": ["pr-reviewer", "agents"],
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": {
+    "from": "now-3h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Agent Review Duration (p95)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, rate(worker_agent_duration_seconds_bucket[5m])) by (agent_type)",
+          "legendFormat": "{{agent_type}} (p95)",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.50, rate(worker_agent_duration_seconds_bucket[5m])) by (agent_type)",
+          "legendFormat": "{{agent_type}} (p50)",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "unit": "s",
+          "custom": {"lineWidth": 2, "fillOpacity": 10}
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "LLM Tokens Used per Agent",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {
+          "expr": "rate(worker_llm_tokens_total[5m]) by (agent_type, model)",
+          "legendFormat": "{{agent_type}} / {{model}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "unit": "short",
+          "custom": {"lineWidth": 2, "fillOpacity": 10}
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Findings by Agent and Severity",
+      "type": "bargauge",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "targets": [
+        {
+          "expr": "sum(increase(worker_findings_total[1h])) by (agent_type, severity)",
+          "legendFormat": "{{agent_type}} / {{severity}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 5},
+              {"color": "red", "value": 20}
+            ]
+          }
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "reduceOptions": {"calcs": ["lastNotNull"]},
+        "displayMode": "gradient"
+      }
+    },
+    {
+      "id": 4,
+      "title": "LLM Request Error Rate",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "targets": [
+        {
+          "expr": "rate(worker_llm_requests_total{status=\"error\"}[5m]) by (agent_type)",
+          "legendFormat": "{{agent_type}} errors/s",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "fixed", "fixedColor": "red"},
+          "unit": "reqps",
+          "custom": {"lineWidth": 2, "fillOpacity": 20}
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Active Review Jobs",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 16},
+      "targets": [
+        {
+          "expr": "worker_active_jobs",
+          "legendFormat": "Active Jobs",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 3},
+              {"color": "red", "value": 8}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Jobs Queue Depth",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 16},
+      "targets": [
+        {
+          "expr": "worker_queue_depth",
+          "legendFormat": "Queue Depth",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 10},
+              {"color": "red", "value": 50}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Review Job Duration (end-to-end)",
+      "type": "timeseries",
+      "gridPos": {"h": 4, "w": 12, "x": 12, "y": 16},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, rate(worker_job_duration_seconds_bucket[5m]))",
+          "legendFormat": "p95 end-to-end",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.50, rate(worker_job_duration_seconds_bucket[5m]))",
+          "legendFormat": "p50 end-to-end",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "unit": "s"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "title": "Total Findings Produced (last hour)",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 20},
+      "targets": [
+        {
+          "expr": "sum(increase(worker_findings_total[1h]))",
+          "legendFormat": "Total Findings",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "fixed", "fixedColor": "blue"},
+          "unit": "short"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "title": "Critical Findings (last hour)",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 20},
+      "targets": [
+        {
+          "expr": "sum(increase(worker_findings_total{severity=\"critical\"}[1h]))",
+          "legendFormat": "Critical",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "red", "value": 1}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 10,
+      "title": "Conventions Learned (last 24h)",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 12, "x": 12, "y": 20},
+      "targets": [
+        {
+          "expr": "sum(increase(learner_conventions_stored_total[24h]))",
+          "legendFormat": "Conventions Stored",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "fixed", "fixedColor": "purple"},
+          "unit": "short"
+        }
+      }
+    }
+  ],
+  "schemaVersion": 38
+}
