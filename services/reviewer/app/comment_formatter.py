@@ -164,10 +164,10 @@ def format_review_summary(
     has_high = severity_counts.get(Severity.HIGH, 0) > 0
     if has_critical:
         verdict = "🚫 **REQUEST CHANGES** — Critical issues found"
-        verdict_style = "CHANGES_REQUESTED"
+        verdict_style = "REQUEST_CHANGES"
     elif has_high:
         verdict = "⚠️ **REQUEST CHANGES** — High severity issues found"
-        verdict_style = "CHANGES_REQUESTED"
+        verdict_style = "REQUEST_CHANGES"
     elif merged_findings:
         verdict = "🔶 **Comment** — Issues found for your consideration"
         verdict_style = "COMMENT"

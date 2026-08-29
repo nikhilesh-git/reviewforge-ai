@@ -1,16 +1,15 @@
 """Free, zero-cost text embeddings for convention storage and retrieval.
 
 Instead of calling a paid API for embeddings, we use a lightweight local
-approach: ``sentence-transformers`` with the ``all-MiniLM-L6-v2`` model.
+approach: FastEmbed with the ``BAAI/bge-small-en-v1.5`` model.
 
 Why this model?
-- Completely free, runs locally on CPU (no GPU needed)
-- ~22MB download on first use, cached thereafter
+- Completely free, runs locally on CPU (no GPU needed) via ONNX
+- Requires no heavy PyTorch dependencies, fitting in 512MB RAM constraints
 - 384-dimensional embeddings (we use this as our embedding dim)
 - Good semantic similarity for code-related text
-- Used by thousands of production systems
 
-If ``sentence-transformers`` is not installed, we fall back to a
+If ``fastembed`` is not installed, we fall back to a
 deterministic hash-based pseudo-embedding that ensures the Qdrant feature
 degrades gracefully (reviews still work, just without convention context).
 """
@@ -24,29 +23,29 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Dimension for the MiniLM model (change QDRANT_EMBEDDING_DIM in .env to match)
+# Dimension for the BGE model (change QDRANT_EMBEDDING_DIM in .env to match)
 MINILM_DIM = 384
 
-_model: Any | None = None  # Lazy-loaded SentenceTransformer
+_model: Any | None = None  # Lazy-loaded FastEmbedEmbeddings
 
 
 def _load_model() -> Any | None:
-    """Lazy-load the SentenceTransformer model on first call."""
+    """Lazy-load the FastEmbed model on first call."""
     global _model  # noqa: PLW0603
     if _model is not None:
         return _model
     try:
-        from sentence_transformers import SentenceTransformer
+        from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
 
-        logger.info("Loading local embedding model (all-MiniLM-L6-v2)...")
-        _model = SentenceTransformer("all-MiniLM-L6-v2")
-        logger.info("Local embedding model loaded (384-dim, runs on CPU)")
+        logger.info("Loading FastEmbed model (BAAI/bge-small-en-v1.5)...")
+        _model = FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
+        logger.info("FastEmbed model loaded (384-dim, runs on CPU)")
         return _model
     except ImportError:
         logger.warning(
-            "sentence-transformers not installed — using hash-based fallback embeddings. "
+            "fastembed not installed — using hash-based fallback embeddings. "
             "Convention search quality will be limited. "
-            "Install with: pip install sentence-transformers"
+            "Install with: pip install fastembed langchain-community"
         )
         return None
 
@@ -54,7 +53,7 @@ def _load_model() -> Any | None:
 def embed_text(text: str) -> list[float]:
     """Embed a text string into a float vector.
 
-    Uses SentenceTransformer locally (free, no API).
+    Uses FastEmbed locally (free, no API).
     Falls back to deterministic hash embedding if not installed.
 
     Args:
@@ -65,8 +64,7 @@ def embed_text(text: str) -> list[float]:
     """
     model = _load_model()
     if model is not None:
-        vector = model.encode(text, normalize_embeddings=True)
-        return vector.tolist()
+        return model.embed_query(text)
 
     # Fallback: deterministic hash-based pseudo-embedding
     # This preserves repeatability (same text → same vector) but
@@ -75,29 +73,25 @@ def embed_text(text: str) -> list[float]:
 
 
 async def aembed_text(text: str) -> list[float]:
-    """Async wrapper around embed_text (SentenceTransformer is sync).
+    """Async wrapper around embed_text.
 
-    SentenceTransformer runs on CPU and is fast enough (<50ms for short texts)
-    that we don't need true async here. For production at scale, run in an
-    executor to avoid blocking the event loop.
+    FastEmbed runs on CPU via ONNX and is extremely fast. For production at scale,
+    we run it in an executor to avoid blocking the event loop.
     """
     import asyncio
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, embed_text, text)
 
 
 def _hash_embed(text: str, dim: int = 384) -> list[float]:
-    """Produce a deterministic pseudo-embedding from a hash.
-
-    This is a last-resort fallback — not semantically meaningful,
-    but at least repeatable and won't crash.
-    """
+    """Deterministic hash-based fallback embedding (no NaN/Inf risk)."""
+    import math
     digest = hashlib.sha512(text.encode("utf-8")).digest()
-    # Repeat digest to fill `dim` floats (each float is 4 bytes = 32 bytes per digest)
     needed_bytes = dim * 4
     repeated = (digest * ((needed_bytes // len(digest)) + 1))[:needed_bytes]
-    raw = struct.unpack(f"{dim}f", repeated)
-    # Normalise to unit vector
-    magnitude = sum(x * x for x in raw) ** 0.5 or 1.0
-    return [x / magnitude for x in raw]
+    # Use unsigned 32-bit ints (always finite) and scale to [-1, 1]
+    raw = struct.unpack(f"{dim}I", repeated)
+    scaled = [(x / 2_147_483_647.5) - 1.0 for x in raw]
+    magnitude = math.sqrt(sum(x * x for x in scaled)) or 1.0
+    return [x / magnitude for x in scaled]

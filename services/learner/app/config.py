@@ -51,10 +51,12 @@ class LearnerSettings(BaseSettings):
     internal_api_key: str = Field(..., min_length=16)
 
     # ─── Qdrant ───────────────────────────────────────────────────────────────
+    qdrant_url: str | None = Field(default=None)
+    qdrant_api_key: str | None = Field(default=None)
     qdrant_host: str = Field(default="localhost")
     qdrant_port: int = Field(default=6333)
     qdrant_collection_name: str = Field(default="repo_conventions")
-    qdrant_embedding_dim: int = Field(default=1536)
+    qdrant_embedding_dim: int = Field(default=384)
 
     # ─── Learning Behavior ────────────────────────────────────────────────────
     min_diff_lines_to_learn: int = Field(

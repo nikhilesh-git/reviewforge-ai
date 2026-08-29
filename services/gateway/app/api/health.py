@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 UTC = timezone.utc
 from typing import Any
 
+import httpx
 import structlog
 from fastapi import APIRouter, Depends, Response, status
 from pydantic import BaseModel
@@ -163,6 +164,38 @@ async def readiness_check(response: Response, settings: SettingsDep) -> HealthRe
             )
         )
         overall_status = "down"
+
+    # ── Qdrant check ──────────────────────────────────────────────────────────
+    qdrant_start = time.perf_counter()
+    try:
+        qdrant_base = settings.qdrant_url if settings.qdrant_url else f"http://{settings.qdrant_host}:{settings.qdrant_port}"
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            # Note: Qdrant cloud uses api-key header
+            headers = {"api-key": settings.qdrant_api_key} if getattr(settings, "qdrant_api_key", None) else {}
+            # /readyz is the standard Qdrant health check endpoint
+            resp = await client.get(f"{qdrant_base.rstrip('/')}/readyz", headers=headers)
+            resp.raise_for_status()
+        qdrant_latency = (time.perf_counter() - qdrant_start) * 1000
+        checks.append(ServiceStatus(name="qdrant", status="ok", latency_ms=round(qdrant_latency, 2)))
+    except Exception as exc:
+        qdrant_latency = (time.perf_counter() - qdrant_start) * 1000
+        checks.append(ServiceStatus(name="qdrant", status="down", latency_ms=round(qdrant_latency, 2), detail=str(exc)[:200]))
+        overall_status = "down"
+
+    # ── OpenRouter check ──────────────────────────────────────────────────────
+    if getattr(settings, "openrouter_api_key", None):
+        or_start = time.perf_counter()
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                headers = {"Authorization": f"Bearer {settings.openrouter_api_key}"}
+                resp = await client.get(f"{settings.openrouter_base_url.rstrip('/')}/auth/key", headers=headers)
+                resp.raise_for_status()
+            or_latency = (time.perf_counter() - or_start) * 1000
+            checks.append(ServiceStatus(name="openrouter", status="ok", latency_ms=round(or_latency, 2)))
+        except Exception as exc:
+            or_latency = (time.perf_counter() - or_start) * 1000
+            checks.append(ServiceStatus(name="openrouter", status="down", latency_ms=round(or_latency, 2), detail=str(exc)[:200]))
+            overall_status = "down"
 
     if overall_status != "ok":
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
