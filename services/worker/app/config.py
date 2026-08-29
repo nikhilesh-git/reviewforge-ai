@@ -39,6 +39,10 @@ class WorkerSettings(BaseSettings):
         return v.upper()
 
     # ─── Database ─────────────────────────────────────────────────────────────
+    database_url_env: str | None = Field(
+        default=None, 
+        validation_alias="database_url",
+    )
     postgres_host: str = Field(default="localhost")
     postgres_port: int = Field(default=5432, ge=1, le=65535)
     postgres_user: str = Field(default="prreviewer")
@@ -49,6 +53,13 @@ class WorkerSettings(BaseSettings):
     @property
     def database_url(self) -> str:
         """Async PostgreSQL DSN — constructed from individual fields."""
+        if self.database_url_env:
+            url = self.database_url_env
+            if url.startswith("postgres://"):
+                url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+            elif url.startswith("postgresql://"):
+                url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+            return url
         return (
             f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
@@ -96,10 +107,12 @@ class WorkerSettings(BaseSettings):
     )
 
     # ─── Qdrant ───────────────────────────────────────────────────────────────
+    qdrant_url: str | None = Field(default=None)
+    qdrant_api_key: str | None = Field(default=None)
     qdrant_host: str = Field(default="localhost")
     qdrant_port: int = Field(default=6333)
     qdrant_collection_name: str = Field(default="repo_conventions")
-    qdrant_embedding_dim: int = Field(default=1536)
+    qdrant_embedding_dim: int = Field(default=384)
 
     # ─── Langfuse (LLM Observability) ─────────────────────────────────────────
     langfuse_secret_key: str | None = Field(default=None)

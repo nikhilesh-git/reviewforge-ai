@@ -116,7 +116,7 @@ make logs-all           # Follow logs
 ### 4. Configure GitHub Webhook
 
 1. Go to your repository → **Settings → Webhooks → Add webhook**
-2. **Payload URL**: `http://your-server:8000/webhooks/github`
+2. **Payload URL**: `http://your-server:8000/api/v1/webhooks/github`
    - For local development, use `make tunnel` (requires [ngrok](https://ngrok.com/))
 3. **Content type**: `application/json`
 4. **Secret**: Same value as `GITHUB_WEBHOOK_SECRET` in your `.env`

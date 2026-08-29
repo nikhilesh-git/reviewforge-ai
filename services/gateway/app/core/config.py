@@ -73,6 +73,11 @@ class Settings(BaseSettings):
     )
 
     # ─── Database ─────────────────────────────────────────────────────────────
+    database_url_env: str | None = Field(
+        default=None, 
+        validation_alias="database_url",
+        description="Full Postgres connection string (overrides individual fields)",
+    )
     postgres_host: str = Field(default="localhost")
     postgres_port: int = Field(default=5432, ge=1, le=65535)
     postgres_user: str = Field(default="prreviewer")
@@ -83,6 +88,13 @@ class Settings(BaseSettings):
     @property
     def database_url(self) -> str:
         """Async PostgreSQL DSN — constructed from individual fields."""
+        if self.database_url_env:
+            url = self.database_url_env
+            if url.startswith("postgres://"):
+                url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+            elif url.startswith("postgresql://"):
+                url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+            return url
         return (
             f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
@@ -92,6 +104,15 @@ class Settings(BaseSettings):
     @property
     def database_url_sync(self) -> str:
         """Sync PostgreSQL DSN — used by Alembic (which doesn't support asyncpg)."""
+        if self.database_url_env:
+            url = self.database_url_env
+            if url.startswith("postgres://"):
+                url = url.replace("postgres://", "postgresql+psycopg2://", 1)
+            elif url.startswith("postgresql://"):
+                url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
+            elif url.startswith("postgresql+asyncpg://"):
+                url = url.replace("postgresql+asyncpg://", "postgresql+psycopg2://", 1)
+            return url
         return (
             f"postgresql+psycopg2://{self.postgres_user}:{self.postgres_password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
@@ -117,6 +138,15 @@ class Settings(BaseSettings):
         min_length=16,
         description="API key for internal service-to-service calls.",
     )
+
+    # ─── Qdrant ───────────────────────────────────────────────────────────────
+    qdrant_url: str | None = Field(default=None)
+    qdrant_host: str = Field(default="localhost")
+    qdrant_port: int = Field(default=6333)
+
+    # ─── OpenRouter ───────────────────────────────────────────────────────────
+    openrouter_api_key: str | None = Field(default=None)
+    openrouter_base_url: str = Field(default="https://openrouter.ai/api/v1")
 
     # ─── Rate Limiting ────────────────────────────────────────────────────────
     max_webhook_events_per_minute: int = Field(

@@ -87,7 +87,6 @@ async def _learn(*, event, log) -> dict:
     """Async implementation of the learning pipeline."""
     from datetime import datetime, timezone
 
-    from langchain_openai import OpenAIEmbeddings
 
     from shared.domain.models import RepositoryConvention, RepositoryRef
 
@@ -115,6 +114,8 @@ async def _learn(*, event, log) -> dict:
         port=settings.qdrant_port,
         collection_name=settings.qdrant_collection_name,
         embedding_dim=settings.qdrant_embedding_dim,
+        url=settings.qdrant_url,
+        api_key=settings.qdrant_api_key,
     )
 
 

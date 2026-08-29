@@ -30,12 +30,13 @@ class PRAction(StrEnum):
     SYNCHRONIZE = "synchronize"
     REOPENED = "reopened"
     CLOSED = "closed"
-    MERGED = "closed"  # merged PRs also come as "closed" with merged=True
+    # Note: merged PRs arrive as action="closed" with merged=True in the payload.
+    # This is handled explicitly in the webhook handler — no separate enum value needed.
 
     @classmethod
-    def reviewable(cls) -> frozenset["PRAction"]:
-        """Return actions that should trigger an AI review."""
-        return frozenset({cls.OPENED, cls.SYNCHRONIZE, cls.REOPENED})
+    def reviewable(cls) -> frozenset[str]:
+        """Return action string values that should trigger an AI review."""
+        return frozenset({cls.OPENED.value, cls.SYNCHRONIZE.value, cls.REOPENED.value})
 
 
 class AgentType(StrEnum):

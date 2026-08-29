@@ -19,7 +19,7 @@ import asyncio
 import logging
 
 from celery import Celery
-from celery.signals import worker_ready, worker_shutdown
+from celery.signals import worker_process_init, worker_process_shutdown
 
 from .config import get_settings
 
@@ -88,8 +88,8 @@ celery_app = create_celery_app()
 # ─── Worker Lifecycle Signals ─────────────────────────────────────────────────
 
 
-@worker_ready.connect
-def on_worker_ready(sender: object, **kwargs: object) -> None:
+@worker_process_init.connect
+def on_worker_process_init(sender: object, **kwargs: object) -> None:
     """Initialize shared resources when a Celery worker process starts.
 
     This runs in each worker process (not the main process), so we must
@@ -115,8 +115,8 @@ def on_worker_ready(sender: object, **kwargs: object) -> None:
     logger.info("Worker process ready — shared resources initialized")
 
 
-@worker_shutdown.connect
-def on_worker_shutdown(sender: object, **kwargs: object) -> None:
+@worker_process_shutdown.connect
+def on_worker_process_shutdown(sender: object, **kwargs: object) -> None:
     """Close shared resources gracefully on worker shutdown."""
     from shared.infrastructure.redis_client import close_redis
     from shared.infrastructure.database import close_database

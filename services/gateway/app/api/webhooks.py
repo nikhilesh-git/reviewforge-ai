@@ -101,6 +101,11 @@ class WebhookIgnoredResponse(BaseModel):
         "and enqueues pull_request events for AI review."
     ),
 )
+@router.post(
+    "/github/",
+    status_code=status.HTTP_202_ACCEPTED,
+    include_in_schema=False,
+)
 async def receive_github_webhook(
     request: Request,
     redis: RedisDep,
@@ -136,7 +141,10 @@ async def receive_github_webhook(
         # ── Step 1: Read raw body (must happen before any parsing) ───────────
         raw_body = await request.body()
 
-        # ── Step 2: Verify HMAC signature ────────────────────────────────────
+        # ── Step 2: Extract proxy IP and Verify HMAC signature ───────────────
+        client_ip = request.headers.get("x-forwarded-for", request.client.host if request.client else "unknown").split(",")[0].strip()
+        log = log.bind(client_ip=client_ip)
+
         if not verify_github_signature(raw_body, x_hub_signature_256, settings.github_webhook_secret):
             record_hmac_failure()
             record_webhook_received(event_type, "unknown", "rejected_hmac", timer.elapsed)

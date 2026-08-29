@@ -17,8 +17,6 @@ and writes to this shared state.
 
 from __future__ import annotations
 
-import asyncio
-import logging
 from typing import Any, TypedDict
 
 import structlog
@@ -293,7 +291,7 @@ async def _embed_text(embedding_client: Any, text: str) -> list[float] | None:
     """Generate a text embedding using the provided client.
 
     The embedding_client is now the free local ``aembed_text`` async function
-    from ``app.embeddings`` (sentence-transformers, no API cost).
+    from ``app.embeddings`` (FastEmbed, no API cost).
     """
     try:
         # embedding_client is a plain async callable: async def aembed_text(text) -> list[float]
@@ -401,10 +399,12 @@ class ReviewOrchestrator:
             port=settings.qdrant_port,
             collection_name=settings.qdrant_collection_name,
             embedding_dim=settings.qdrant_embedding_dim,
+            url=settings.qdrant_url,
+            api_key=settings.qdrant_api_key,
         )
 
-        # Free local embeddings — uses sentence-transformers (all-MiniLM-L6-v2)
-        # Runs on CPU, no API key needed, no cost.
+        # Free local embeddings — uses FastEmbed (BAAI/bge-small-en-v1.5)
+        # Runs on CPU via ONNX, no API key needed, minimal RAM cost.
         from .embeddings import aembed_text as _local_embed
         self._embedding_client = _local_embed
 

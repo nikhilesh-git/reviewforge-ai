@@ -238,8 +238,8 @@ async def _execute_review(
             .where(ReviewJobRecord.id == uuid.UUID(job_id))
             .values(
                 status=JobStatus.PUBLISHING,
-                agent_results=[r.model_dump() for r in agent_results],
-                findings=[f.model_dump() for f in merged_findings],
+                agent_results=[r.model_dump(mode="json") for r in agent_results],
+                findings=[f.model_dump(mode="json") for f in merged_findings],
                 total_findings=len(merged_findings),
                 critical_findings=critical_count,
                 tokens_used=total_tokens,
@@ -256,8 +256,8 @@ async def _execute_review(
                 "pr_url": event.pr_url,
                 "head_sha": event.head_sha,
                 "installation_id": event.installation_id,
-                "agent_results": [r.model_dump() for r in agent_results],
-                "merged_findings": [f.model_dump() for f in merged_findings],
+                "agent_results": [r.model_dump(mode="json") for r in agent_results],
+                "merged_findings": [f.model_dump(mode="json") for f in merged_findings],
             }],
             queue="review",
         )
@@ -310,18 +310,196 @@ async def _mark_job_failed(job_id: str, error_message: str) -> None:
         logger.error("Failed to update job status to failed", error=str(exc))
 
 
-# Import reviewer task for dispatching (circular-safe via string name)
-# This allows the worker to send tasks to the reviewer queue.
-@celery_app.task(name="app.tasks.post_review_comments")
-def post_review_comments(payload: dict) -> dict:
-    """Stub task that forwards to the reviewer service.
+# ─── GitHub Comment Posting ───────────────────────────────────────────────────
 
-    In production, the reviewer service runs its own Celery worker
-    and picks up tasks from the same Redis broker.
+
+@celery_app.task(
+    name="app.tasks.post_review_comments",
+    bind=True,
+    max_retries=3,
+    default_retry_delay=30,
+    queue="review",
+)
+def post_review_comments(self, payload: dict) -> dict:
+    """Post the AI review findings as a GitHub PR review comment.
+
+    Formats the merged findings from all agents into a clean, structured
+    markdown comment and submits it as a PR review via the GitHub API.
     """
-    logger.info(
-        "post_review_comments task received — reviewer service will handle this",
-        job_id=payload.get("job_id"),
-        findings=len(payload.get("merged_findings", [])),
+    return _run_async(_post_review_to_github(self, payload))
+
+
+async def _post_review_to_github(task, payload: dict) -> dict:
+    """Async implementation: format findings and post to GitHub."""
+    import httpx
+
+    settings = get_settings()
+    job_id = payload.get("job_id", "unknown")
+    repo_full_name = payload.get("repo_full_name", "")
+    pr_number = payload.get("pr_number", 0)
+    head_sha = payload.get("head_sha", "")
+    merged_findings = payload.get("merged_findings", [])
+    agent_results = payload.get("agent_results", [])
+
+    log = logger.bind(
+        job_id=job_id,
+        repo=repo_full_name,
+        pr_number=pr_number,
+        findings=len(merged_findings),
     )
-    return {"status": "forwarded"}
+
+    log.info("Posting review comment to GitHub")
+
+    # ── Format the review body ─────────────────────────────────────────────
+    body = _format_review_body(merged_findings, agent_results)
+
+    # ── Determine overall review event ────────────────────────────────────
+    # Always use COMMENT — GitHub forbids REQUEST_CHANGES if the reviewer
+    # is the same user who opened the PR (which is the case when using a PAT).
+    # In production with a GitHub App bot account, this restriction doesn't apply.
+    event = "COMMENT"
+
+    # ── Submit the review via GitHub API ───────────────────────────────────
+    pat = settings.github_pat
+    if not pat:
+        log.error("No GitHub PAT configured — cannot post review")
+        return {"status": "error", "reason": "no_github_pat"}
+
+    url = f"https://api.github.com/repos/{repo_full_name}/pulls/{pr_number}/reviews"
+    headers = {
+        "Authorization": f"Bearer {pat}",
+        "Accept": "application/vnd.github.v3+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "pr-reviewer-bot/0.1.0",
+    }
+    review_payload = {
+        "commit_id": head_sha,
+        "body": body,
+        "event": event,
+    }
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.post(url, headers=headers, json=review_payload)
+        if response.status_code not in (200, 201):
+            log.error(
+                "Failed to post review to GitHub",
+                status_code=response.status_code,
+                response=response.text[:500],
+            )
+            raise RuntimeError(
+                f"GitHub API returned {response.status_code}: {response.text[:200]}"
+            )
+
+    log.info(
+        "Successfully posted review to GitHub",
+        review_event=event,
+        findings=len(merged_findings),
+    )
+    return {
+        "status": "posted",
+        "event": event,
+        "findings_count": len(merged_findings),
+        "pr_number": pr_number,
+        "repo": repo_full_name,
+    }
+
+
+def _format_review_body(merged_findings: list[dict], agent_results: list[dict]) -> str:
+    """Format the AI findings into a clean, readable GitHub review comment."""
+    from collections import defaultdict
+
+    SEVERITY_EMOJI = {
+        "critical": "🔴",
+        "high": "🟠",
+        "medium": "🟡",
+        "low": "🔵",
+        "info": "⚪",
+    }
+
+    AGENT_EMOJI = {
+        "security": "🔒",
+        "architecture": "🏗️",
+        "static_analysis": "🔍",
+        "style": "✨",
+    }
+
+    lines = ["## 🤖 AI Code Review\n"]
+
+    # ── Summary table ──────────────────────────────────────────────────────
+    if not merged_findings:
+        lines.append("✅ **No issues found!** The code looks good.\n")
+    else:
+        # Count by severity
+        severity_counts: dict[str, int] = defaultdict(int)
+        for f in merged_findings:
+            severity_counts[f.get("severity", "info")] += 1
+
+        summary_parts = []
+        for sev in ("critical", "high", "medium", "low", "info"):
+            count = severity_counts.get(sev, 0)
+            if count:
+                summary_parts.append(f"{SEVERITY_EMOJI[sev]} **{count} {sev}**")
+
+        lines.append(f"Found **{len(merged_findings)} issue(s)**: {' · '.join(summary_parts)}\n")
+
+    # ── Agent summaries ─────────────────────────────────────────────────────
+    if agent_results:
+        lines.append("### Agent Summaries\n")
+        for ar in agent_results:
+            agent_type = ar.get("agent_type", "unknown")
+            summary = ar.get("summary", "")
+            emoji = AGENT_EMOJI.get(agent_type, "🤖")
+            if summary and not summary.startswith("Agent failed"):
+                lines.append(f"- {emoji} **{agent_type.replace('_', ' ').title()}**: {summary}")
+        lines.append("")
+
+    # ── Findings grouped by severity ────────────────────────────────────────
+    if merged_findings:
+        lines.append("---\n")
+        lines.append("### Findings\n")
+
+        # Group by severity
+        by_severity: dict[str, list[dict]] = defaultdict(list)
+        for f in merged_findings:
+            by_severity[f.get("severity", "info")].append(f)
+
+        for sev in ("critical", "high", "medium", "low", "info"):
+            findings_at_sev = by_severity.get(sev, [])
+            if not findings_at_sev:
+                continue
+
+            emoji = SEVERITY_EMOJI[sev]
+            lines.append(f"#### {emoji} {sev.upper()}\n")
+
+            for finding in findings_at_sev:
+                title = finding.get("title", "Untitled Finding")
+                description = finding.get("description", "")
+                suggestion = finding.get("suggestion")
+                location = finding.get("location")
+                agent_type = finding.get("agent_type", "")
+
+                agent_emoji = AGENT_EMOJI.get(agent_type, "🤖")
+                lines.append(f"**{title}** {agent_emoji}")
+
+                if location:
+                    file_path = location.get("file_path", "")
+                    line_start = location.get("line_start", "")
+                    if file_path:
+                        lines.append(f"> 📄 `{file_path}` (line {line_start})")
+
+                if description:
+                    lines.append(f"\n{description}")
+
+                if suggestion:
+                    lines.append(f"\n💡 **Suggestion:**\n{suggestion}")
+
+                lines.append("\n---")
+
+    # ── Footer ──────────────────────────────────────────────────────────────
+    lines.append(
+        "\n<sub>Generated by [ReviewForge AI](https://github.com/nikhilesh-git/github_pr_code_reviewer) "
+        "· Powered by OpenRouter</sub>"
+    )
+
+    return "\n".join(lines)
+

@@ -61,12 +61,17 @@ class QdrantConventionStore:
 
     def __init__(
         self,
-        host: str,
-        port: int,
-        collection_name: str,
+        host: str = "localhost",
+        port: int = 6333,
+        collection_name: str = "repo_conventions",
         embedding_dim: int = 1536,
+        url: str | None = None,
+        api_key: str | None = None,
     ) -> None:
-        self._client = AsyncQdrantClient(host=host, port=port)
+        if url:
+            self._client = AsyncQdrantClient(url=url, api_key=api_key)
+        else:
+            self._client = AsyncQdrantClient(host=host, port=port)
         self._collection_name = collection_name
         self._embedding_dim = embedding_dim
 

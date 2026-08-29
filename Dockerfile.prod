@@ -1,0 +1,81 @@
+# =============================================================================
+# Multi-stage build — Stage 1: Builder
+# Installs all Python packages inside an isolated virtual environment.
+# build-essential and libpq-dev are ONLY needed here for compiling native
+# extensions (psycopg2, hiredis, etc.) and are NOT copied to the final image.
+# =============================================================================
+FROM python:3.12-slim AS builder
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=on \
+    PIP_DEFAULT_TIMEOUT=100 \
+    VIRTUAL_ENV=/opt/venv
+
+# Create a virtual environment so it can be cleanly copied to runtime stage
+RUN python -m venv $VIRTUAL_ENV
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
+# Install build dependencies (compiler + postgres headers for native extensions)
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy source code for all modules
+COPY pyproject.toml .
+COPY shared/ ./shared/
+COPY services/ ./services/
+
+# Install all packages into the venv (no [dev] extras)
+RUN pip install ./shared ./services/gateway ./services/worker ./services/reviewer ./services/learner
+
+# =============================================================================
+# Stage 2: Runtime
+# Lean final image — no compiler, no headers, just the venv + runtime libs.
+# =============================================================================
+FROM python:3.12-slim AS runtime
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    VIRTUAL_ENV=/opt/venv \
+    PORT=8000
+
+# Add venv to PATH so uvicorn, celery etc. are found without activation
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
+# Only runtime system packages:
+#   supervisor  — process manager for gateway + worker + consumer
+#   libpq5      — PostgreSQL client runtime library (NOT -dev headers)
+#   curl        — health checks / Render health probe
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        supervisor \
+        libpq5 \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy the fully-built virtual environment from the builder stage
+COPY --from=builder /opt/venv /opt/venv
+
+# Copy application source (needed at runtime for module resolution)
+COPY pyproject.toml .
+COPY shared/ ./shared/
+COPY services/ ./services/
+COPY alembic.ini .
+COPY migrations/ ./migrations/
+
+# Copy supervisord config
+COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+
+# Expose the API port
+EXPOSE $PORT
+
+# Run supervisord (manages gateway + worker + consumer processes)
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
